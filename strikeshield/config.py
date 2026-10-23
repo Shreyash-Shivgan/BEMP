@@ -48,6 +48,7 @@ class TechniqueFamily(BaseModel):
 
 
 class TaxonomyGridConfig(BaseModel):
+    corpus_role: str = "smoke"
     dedup_threshold: float = 0.10
     patch_split_ratio: float = 0.80
     heldout_split_ratio: float = 0.20

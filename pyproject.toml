@@ -30,6 +30,10 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "real_llm: marks tests that require a live Ollama server with GPU (deselected by default)",
+]
+addopts = "-m 'not real_llm'"
 
 [tool.mypy]
 python_version = "3.11"
