@@ -5,7 +5,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, Dict, List, Optional, Type, TypeVar
 import requests
 from pydantic import BaseModel, ValidationError
 
