@@ -127,6 +127,8 @@ def test_bpr_inverted_grading(eval_db: Path, tmp_path: Path, monkeypatch: pytest
 def test_empty_policy_leak_regression_against_baseline(eval_db: Path, tmp_path: Path) -> None:
     """DoD synthetic two-version test: v0 blocks attacks, empty v0-test leaks them -> regression_count > 0."""
     conn = get_connection(eval_db)
+    conn.execute("INSERT OR IGNORE INTO policies (version, status) VALUES ('v0-test', 'ACCEPTED');")
+    conn.execute("INSERT OR IGNORE INTO runs (id, seed, iteration, config_json) VALUES ('r_test', 0, 0, '{}');")
     # v0 blocked atk_1 and atk_2
     conn.execute("INSERT OR REPLACE INTO evaluations (policy_version, attack_id, blocked, run_id) VALUES ('v0', 'atk_1', 1, 'r0');")
     conn.execute("INSERT OR REPLACE INTO evaluations (policy_version, attack_id, blocked, run_id) VALUES ('v0', 'atk_2', 1, 'r0');")
