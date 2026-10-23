@@ -1,0 +1,4 @@
+{
+  "prompt_contains": "Trigger malformed output test",
+  "response": "{ 'evidence': unquoted_string, verdict: invalid_json, confidence: 'high' }"
+}

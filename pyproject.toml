@@ -1,0 +1,43 @@
+[project]
+name = "strikeshield"
+version = "0.1.0"
+description = "CI for your safety layer: Closed-loop automated adversarial testing and self-hardening pipeline for LLM guardrails."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "pyyaml>=6.0.1",
+    "requests>=2.31.0",
+    "numpy>=1.26.0",
+    "scikit-learn>=1.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "hypothesis>=6.98.0",
+    "mypy>=1.9.0",
+    "ruff>=0.3.0",
+    "types-pyyaml>=6.0.12.20240311",
+    "types-requests>=2.31.0.20240311",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

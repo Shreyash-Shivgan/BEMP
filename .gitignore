@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Databases
+*.db
+*.db-wal
+*.db-shm
+
+# Runs artifacts (keep folder tracked via .gitkeep)
+runs/*
+!runs/.gitkeep
