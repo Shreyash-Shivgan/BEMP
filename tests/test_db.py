@@ -15,11 +15,11 @@ def temp_db(tmp_path: Path) -> Path:
 def test_init_and_migrate_idempotent(temp_db: Path) -> None:
     init_db(temp_db)
     v1 = migrate(temp_db)
-    assert v1 == 3
+    assert v1 == 6
 
     # Second migration must be idempotent no-op
     v2 = migrate(temp_db)
-    assert v2 == 3
+    assert v2 == 6
 
 
 def test_schema_tables_exist(temp_db: Path) -> None:

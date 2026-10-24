@@ -20,3 +20,8 @@ dist/
 # Runs artifacts (keep folder tracked via .gitkeep)
 runs/*
 !runs/.gitkeep
+!runs/experiments_summary.md
+!runs/report_manifest.json
+!runs/*/report_manifest.json
+!runs/*/loop_summary.json
+!runs/*/results_table.md

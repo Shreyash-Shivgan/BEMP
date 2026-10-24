@@ -32,6 +32,7 @@ class GateConfig(BaseModel):
     bpr_threshold: float = 0.90
     regression_budget: int = 0
     asr_must_not_increase: bool = True
+    strict_asr_improvement: bool = False
     max_heldout_gap: float = 0.05
     noise_floor: NoiseFloorConfig
 

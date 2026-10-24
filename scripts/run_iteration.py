@@ -37,6 +37,44 @@ def main() -> None:
         help="Run complete evaluation (attacks + benign set + regressions + metrics storage)",
     )
     parser.add_argument(
+        "--through-patch",
+        action="store_true",
+        help="Run complete pipeline through patch generation and validation (ingest -> eval -> patch)",
+    )
+    parser.add_argument(
+        "--through-gate",
+        action="store_true",
+        help="Run complete pipeline through gate evaluation (ingest -> eval v0 -> patch -> eval v1 -> gate)",
+    )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Run multi-seed closed-loop self-hardening iterations",
+    )
+    parser.add_argument(
+        "--seeds",
+        type=str,
+        default="0,1,2",
+        help="Comma-separated evaluation seeds (e.g. 0,1,2)",
+    )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=3,
+        help="Maximum loop hardening iterations",
+    )
+    parser.add_argument(
+        "--strict-asr-improvement",
+        action="store_true",
+        help="Require candidate ASR range to be strictly non-overlapping and better than baseline",
+    )
+    parser.add_argument(
+        "--strict-noise-floor",
+        type=str,
+        default="true",
+        help="Enforce strict noise floor (true/false)",
+    )
+    parser.add_argument(
         "--diagnose",
         action="store_true",
         help="Run target model and print raw responses with keyword checks, bypassing the Judge",
@@ -91,6 +129,34 @@ def main() -> None:
         coverage = get_coverage_report(args.db)
         print(coverage.format_table())
         sys.exit(0)
+
+    if args.loop:
+        from strikeshield.loop import HardeningLoop, LoopConfig
+        print(f"=== StrikeShield: Multi-Seed Hardening Loop (Policy: {args.policy.name}) ===")
+        records = load_jsonl(args.corpus)
+        build_corpus(records, db_path=args.db, seed=args.seed)
+
+        seeds = [int(s.strip()) for s in args.seeds.split(",") if s.strip()]
+        loop_cfg = LoopConfig(
+            seeds=seeds,
+            max_iterations=args.max_iterations,
+            strict_asr_improvement=args.strict_asr_improvement,
+        )
+        loop = HardeningLoop(
+            config=loop_cfg,
+            db_path=args.db,
+            initial_policy_path=args.policy,
+        )
+        loop_result = loop.run()
+        print("\n=== StrikeShield Hardening Loop Result ===")
+        print(loop_result.summary_markdown)
+
+        run_dir = Path("runs") / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "loop_summary.md").write_text(loop_result.summary_markdown, encoding="utf-8")
+        (run_dir / "loop_summary.json").write_text(loop_result.model_dump_json(indent=2), encoding="utf-8")
+        print(f"\n[LOOP COMPLETE] Summary written to: {run_dir / 'loop_summary.md'}")
+        sys.exit(0 if loop_result.final_decision in ("ACCEPT", "NO_ACTION_NEEDED") else 1)
 
     if args.diagnose:
         print(f"=== StrikeShield: Diagnostic Analysis Mode (Bypassing Judge) ===")
@@ -215,6 +281,154 @@ def main() -> None:
         if result.artifact_path:
             print(f"\n[OK] Run artifact saved to: {result.artifact_path}")
         sys.exit(0)
+
+    if args.through_patch:
+        print(f"=== StrikeShield: Running Pipeline Through Patch Generation (Policy: {args.policy.name}) ===")
+        check_judge_validation_status()
+
+        # 1. Ingest attacks
+        raw_records = load_jsonl(args.corpus)
+        build_corpus(raw_records, db_path=args.db, seed=args.seed)
+
+        policy_text = args.policy.read_text(encoding="utf-8")
+        policy_version = args.policy.stem
+
+        conn = get_connection(args.db)
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO policies (version, diff_text, status) VALUES (?, ?, ?);",
+                (policy_version, "Evaluated baseline policy", "ACCEPTED"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # 2 & 3. Target + Judge + Baseline Evaluation
+        evaluator = Evaluator(db_path=args.db)
+        eval_result = evaluator.evaluate(
+            policy_version=policy_version,
+            policy_text=policy_text,
+            seed=args.seed,
+            run_id=run_id,
+        )
+        print(eval_result.format_report())
+
+        # 4. Run Patcher with baseline's successes and weakest techniques
+        from strikeshield.patcher import Patcher, PolicyVersion
+        from strikeshield.errors import PatcherTooWeakError
+        from scripts.patch import load_baseline_data
+
+        successes_by_family, weakest_fams = load_baseline_data(run_id, args.db)
+        patcher = Patcher()
+
+        try:
+            candidate = patcher.generate_patch(
+                policy=PolicyVersion.from_file(args.policy),
+                successes_by_family=successes_by_family,
+                weakest_families_list=weakest_fams,
+                current_metrics=eval_result,
+                db_path=args.db,
+            )
+
+            # 5. Print results
+            print("\n=== Candidate Patch Generated Successfully ===")
+            print(f"Candidate Version:  {candidate.version}")
+            print(f"Parent Version:     {candidate.parent_version}")
+            print(f"Model Used:         {candidate.model_used}")
+            print(f"Fallback Used:      {candidate.fallback_used}")
+            print(f"Candidate Status:   {candidate.status}")
+            print(f"Git Commit:         {candidate.git_commit}")
+            print(f"Validation Result:  ok=True")
+            print("\n--- Diff ---")
+            print(candidate.diff_text)
+            print("------------")
+            sys.exit(0)
+        except PatcherTooWeakError as e:
+            print(f"\n[FATAL] Patcher failed validation and escalation: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.through_gate:
+        print(f"=== StrikeShield: Running Pipeline Through Gate Verification (Policy: {args.policy.name}) ===")
+        check_judge_validation_status()
+        strict_noise_floor = args.strict_noise_floor.lower() in ("true", "1", "yes")
+
+        # 1. Ingest attacks
+        raw_records = load_jsonl(args.corpus)
+        build_corpus(raw_records, db_path=args.db, seed=args.seed)
+
+        policy_text = args.policy.read_text(encoding="utf-8")
+        policy_version = args.policy.stem
+
+        conn = get_connection(args.db)
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO policies (version, diff_text, status) VALUES (?, ?, ?);",
+                (policy_version, "Evaluated baseline policy", "ACCEPTED"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # 2 & 3. Target + Judge + Baseline v0 Evaluation
+        evaluator = Evaluator(db_path=args.db)
+        v0_eval = evaluator.evaluate(
+            policy_version=policy_version,
+            policy_text=policy_text,
+            seed=args.seed,
+            run_id=run_id,
+        )
+        print("\n--- Baseline Evaluation Report ---")
+        print(v0_eval.format_report())
+
+        # 4. Patch v0 -> v1
+        from strikeshield.patcher import Patcher, PolicyVersion
+        from strikeshield.errors import PatcherTooWeakError
+        from strikeshield.gate import Gate, GateDecision
+        from scripts.patch import load_baseline_data
+
+        successes_by_family, weakest_fams = load_baseline_data(run_id, args.db)
+        patcher = Patcher()
+
+        try:
+            candidate = patcher.generate_patch(
+                policy=PolicyVersion.load(args.policy),
+                successes_by_family=successes_by_family,
+                weakest_families_list=weakest_fams,
+                current_metrics=v0_eval,
+                db_path=args.db,
+            )
+            print(f"\n[PATCH CREATED] Candidate version: {candidate.version} (Model: {candidate.model_used})")
+        except PatcherTooWeakError as e:
+            print(f"\n[FATAL] Patcher failed validation and escalation: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        # 5. Evaluate v1
+        v1_eval = evaluator.evaluate(
+            policy_version=candidate.version,
+            policy_text=candidate.policy_text,
+            seed=args.seed,
+        )
+        v1_eval.addressed_families = candidate.addressed_families
+        print("\n--- Candidate Evaluation Report ---")
+        print(v1_eval.format_report())
+
+        # 6. Gate v1 against v0
+        gate = Gate(strict_noise_floor=strict_noise_floor)
+        gate_res = gate.evaluate(candidate=v1_eval, baseline=v0_eval)
+        gate.record_decision(
+            candidate_version=candidate.version,
+            result=gate_res,
+            db_path=args.db,
+            candidate_file=Path("policies") / f"{candidate.version}.md",
+        )
+
+        print("\n--- Gate Decision & Audit Conditions ---")
+        print(gate_res.format_table())
+
+        if gate_res.decision == GateDecision.REJECT:
+            sys.exit(1)
+        else:
+            sys.exit(0)
 
     if args.through_judge:
         print(f"=== StrikeShield: Running Baseline Target + Judge Pipeline (Policy: {args.policy.name}) ===")

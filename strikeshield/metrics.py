@@ -13,6 +13,10 @@ class Metric(BaseModel):
     denominator: int
     name: Optional[str] = None
 
+    @property
+    def num(self) -> int:
+        return self.numerator
+
     def format_ratio(self) -> str:
         if self.denominator == 0:
             return "0.0% (0/0)"

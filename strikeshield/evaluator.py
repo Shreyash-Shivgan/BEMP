@@ -43,6 +43,8 @@ class EvaluationResult(BaseModel):
     per_family_asr: Dict[str, Dict[str, Any]]
     judge_health_data: Dict[str, Any]
     artifact_path: Optional[Path] = None
+    noise_floor_k: int = 1
+    addressed_families: List[str] = []
 
     @property
     def regression_count(self) -> int:
@@ -131,13 +133,20 @@ def compute_regressions_from_db(
     """Computes regressions from stored evaluations using SQL joins.
 
     Rule: An attack is a regression if it was blocked by ANY earlier version (blocked=1)
-    and is leaked by current_version (blocked=0).
+    and is leaked by current_version (blocked=0), considering the latest evaluation for each version.
     """
     cursor = conn.execute(
         """
+        WITH latest_evals AS (
+            SELECT policy_version, attack_id, blocked
+            FROM evaluations
+            WHERE id IN (
+                SELECT MAX(id) FROM evaluations GROUP BY policy_version, attack_id
+            )
+        )
         SELECT DISTINCT e_now.attack_id, a.prompt, a.cell_id
-        FROM evaluations e_now
-        JOIN evaluations e_prior ON e_now.attack_id = e_prior.attack_id
+        FROM latest_evals e_now
+        JOIN latest_evals e_prior ON e_now.attack_id = e_prior.attack_id
         JOIN attacks a ON e_now.attack_id = a.id
         WHERE e_now.policy_version = ?
           AND e_now.blocked = 0
@@ -154,8 +163,15 @@ def compute_regressions_from_db(
         # Find all earlier versions that blocked this attack
         prior_cursor = conn.execute(
             """
+            WITH latest_evals AS (
+                SELECT policy_version, attack_id, blocked
+                FROM evaluations
+                WHERE id IN (
+                    SELECT MAX(id) FROM evaluations GROUP BY policy_version, attack_id
+                )
+            )
             SELECT DISTINCT policy_version
-            FROM evaluations
+            FROM latest_evals
             WHERE attack_id = ? AND blocked = 1 AND policy_version != ?;
             """,
             (atk_id, current_version),
@@ -201,7 +217,7 @@ class Evaluator:
         try:
             # 1. Query all attack records from attacks table
             cursor = conn.execute(
-                "SELECT id, prompt, risk_category, technique_family, target_behaviour, cell_id, split FROM attacks;"
+                "SELECT id, prompt, risk_category, technique_family, target_behaviour, cell_id, split FROM attacks WHERE source != 'benign_set' AND risk_category != 'benign_query';"
             )
             attack_rows = cursor.fetchall()
             attacks = [
@@ -403,15 +419,16 @@ class Evaluator:
             # 10. Judge Health Metrics
             jh = judge_health(active_run_id, conn)
 
-            # 11. Store row in metrics table (Flag F: backend from settings, corpus_role from taxonomy)
+            # 11. Store row in metrics table (Flag F: backend from settings, corpus_role from taxonomy, Flag J: regressed_attack_ids_json)
             cov_report = get_coverage_report(self.db_path)
+            regressed_ids = [r.attack_id for r in regressions]
             conn.execute(
                 """
                 INSERT INTO metrics (
                     run_id, policy_version, asr_all, asr_patch, asr_heldout, bpr,
                     regressions, regression_count, grid_coverage, mean_pairwise_dist,
-                    backend, corpus_role, judge_health_json, noise_floor_k
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    backend, corpus_role, judge_health_json, noise_floor_k, regressed_attack_ids_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     active_run_id,
@@ -420,14 +437,15 @@ class Evaluator:
                     asr_patch_metric.value,
                     asr_heldout_metric.value,
                     bpr_metric.value,
-                    len(regressions),
-                    len(regressions),
+                    len(regressed_ids),
+                    len(regressed_ids),
                     cov_report.coverage_ratio,
                     cov_report.mean_pairwise_distance,
                     settings.llm_backend,
                     settings.taxonomy.grid.corpus_role,
                     json.dumps(jh),
                     1,
+                    json.dumps(regressed_ids),
                 ),
             )
             conn.commit()

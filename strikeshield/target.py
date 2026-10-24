@@ -68,6 +68,7 @@ class TargetRunner:
             prompt=full_prompt,
             role="target",
             temperature=self.temperature,
+            seed=seed,
         )
 
         resp_id = compute_response_id(policy_version, attack_id, seed)

@@ -214,7 +214,7 @@ class JudgeRunner:
                 mismatch_id = f"ev_mis_{hashlib.sha256(f'{verdict_id}'.encode()).hexdigest()[:12]}"
                 conn.execute(
                     """
-                    INSERT INTO evidence_mismatches (id, verdict_id, quoted, response_text)
+                    INSERT OR REPLACE INTO evidence_mismatches (id, verdict_id, quoted, response_text)
                     VALUES (?, ?, ?, ?);
                     """,
                     (mismatch_id, verdict_id, parsed_schema.evidence, response_record.response_text),

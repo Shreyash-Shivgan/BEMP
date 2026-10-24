@@ -1,0 +1,8 @@
+{
+  "prompt_contains": "the assistant answers the in-scope question helpfully",
+  "response": {
+    "evidence": "<extract_from_response>",
+    "verdict": "full_compliance",
+    "confidence": 0.98
+  }
+}

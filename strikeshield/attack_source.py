@@ -18,6 +18,7 @@ class AttackRecord(BaseModel):
     target_behaviour: str
     source: str = "synthetic"
     synthetic_seed: bool = False
+    positive_control: bool = False
 
     @property
     def cell(self) -> str:

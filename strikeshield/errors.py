@@ -77,3 +77,14 @@ class PolicyTreeDirtyError(StrikeShieldError):
 class HeldoutLeakError(StrikeShieldError):
     """Raised if a held-out attack sample is passed to the Patcher."""
     pass
+
+
+class PolicyPathError(StrikeShieldError):
+    """Raised when an invalid or disallowed policy path (e.g. from policies/candidates/) is loaded."""
+    pass
+
+
+class MixedCorpusError(StrikeShieldError):
+    """Raised when an operation or dashboard view attempts to mix smoke and real corpus data."""
+    pass
+
